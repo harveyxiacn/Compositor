@@ -1,0 +1,33 @@
+[package]
+name = "compositor"
+version = "0.1.0"
+edition = "2021"
+description = "Compositor for Windows and Linux: a layered image editor that reads and writes the macOS app's .comp projects"
+license = "MIT"
+build = "build.rs"
+default-run = "compositor"
+
+[dependencies]
+eframe = { version = "0.36", default-features = false, features = ["default_fonts", "wgpu", "glow", "x11", "wayland", "accesskit", "links"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "tiff", "bmp", "gif"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+rayon = "1.10"
+rfd = "0.17"
+anyhow = "1"
+
+[build-dependencies]
+cc = "1"
+embed-resource = "3"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = true
