@@ -1,0 +1,104 @@
+name: Windows & Linux
+
+on:
+  push:
+    branches: ['**']
+    tags: ['cross-v*']
+  pull_request:
+    paths:
+      - 'cross/**'
+      - 'Compositor/Rendering/**'
+      - '.github/workflows/cross-platform.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: cross-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+          # The oldest supported Ubuntu, so the binary runs on older glibc too.
+          - name: linux-x64
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: cross
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cross
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build release
+        run: cargo build --release --locked
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/compositor | Out-Null
+          Copy-Item target/release/compositor.exe, target/release/compositor-cli.exe, README.md dist/compositor/
+          Compress-Archive -Path dist/compositor/* -DestinationPath dist/compositor-${{ matrix.name }}.zip -Force
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist/compositor
+          cp target/release/compositor target/release/compositor-cli README.md dist/compositor/
+          cp packaging/linux/compositor.desktop packaging/linux/install.sh dist/compositor/
+          cp ../Compositor/Assets.xcassets/AppIcon.appiconset/app-icon-256.png dist/compositor/compositor.png
+          tar -C dist -czf dist/compositor-${{ matrix.name }}.tar.gz compositor
+
+      - name: Upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: compositor-${{ matrix.name }}
+          path: |
+            cross/dist/*.zip
+            cross/dist/*.tar.gz
+          retention-days: 14
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/cross-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download builds
+        uses: actions/download-artifact@v7
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" dist/* --repo "${{ github.repository }}" --title "Compositor for Windows & Linux ${{ github.ref_name }}" --generate-notes
